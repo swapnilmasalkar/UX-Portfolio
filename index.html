@@ -81,11 +81,11 @@ html.js:not(.hero-in) .rail-bars i,html.js:not(.hero-in) .rail-read{opacity:0}
 .hero-title{grid-column:1;grid-row:1;padding:56px 48px 40px;display:flex;flex-direction:column;justify-content:flex-end;border-top:1px solid var(--line)}
 .hero h1{font-weight:700;font-size:clamp(34px,4.6vw,68px);line-height:1.06;letter-spacing:-.022em;max-width:13.5em}
 .js .hero h1{visibility:hidden}
-.rot{display:inline-block;color:var(--rust);font-family:var(--mono);font-weight:500;letter-spacing:-.04em}
-.rot.out{animation:rotOut .45s var(--ease) forwards}
-.rot.in{animation:rotIn .45s var(--ease) forwards}
-@keyframes rotOut{to{opacity:0;transform:translateY(.35em)}}
-@keyframes rotIn{from{opacity:0;transform:translateY(-.35em)}to{opacity:1;transform:none}}
+.rot{display:inline-grid;color:var(--rust);font-family:var(--mono);font-weight:500;letter-spacing:-.04em}
+/* all words share one cell, so the slot is always as wide as the widest word: the headline never rewraps */
+.rw{grid-area:1/1;opacity:0;transform:translateY(-.35em);transition:opacity .45s var(--ease),transform .45s var(--ease)}
+.rw.on{opacity:1;transform:none}
+.rw.off{opacity:0;transform:translateY(.35em)}
 .hero-lede{grid-column:1;grid-row:2;padding:28px 48px 32px;color:var(--muted);max-width:38em}
 .hero-lede p{max-width:34em}
 .rig-stage{grid-column:2;grid-row:1/3;position:relative;min-height:420px;overflow:hidden;border-top:1px solid var(--line)}
@@ -219,7 +219,7 @@ footer a:hover{color:var(--ink)}
 
 <section class="hero wrap" id="hero" aria-label="Introduction">
   <div class="hero-title">
-    <h1 id="heroTitle">A petroleum engineer turned product designer, still chasing <span class="rot" id="rotWord">perfection</span></h1>
+    <h1 id="heroTitle">A petroleum engineer turned product designer, still chasing <span class="rot" id="rotWord"><span class="rw on">perfection</span><span class="rw" aria-hidden="true">precision</span><span class="rw" aria-hidden="true">alignment</span><span class="rw" aria-hidden="true">clarity</span></span></h1>
   </div>
   <div class="hero-lede">
     <p>I spent years reading well logs before I ever opened Figma. Same obsession with getting the details right, just different instruments now.</p>
@@ -693,7 +693,7 @@ function heroIn() {
   if (rig && RM) { rig.full = true; rig.dirty = true; rig.kick(); }
   const h1 = $('#heroTitle');
   if (hasGSAP && window.SplitText && !RM) {
-    const split = new SplitText(h1, { type: 'lines', mask: 'lines' });
+    const split = new SplitText(h1, { type: 'lines', mask: 'lines', ignore: '#rotWord', aria: 'none' });
     gsap.set(h1, { visibility: 'visible' });
     gsap.from(split.lines, { yPercent: 105, duration: .9 * K + .25, ease: 'expo.out', stagger: .11 * K, delay: .15 * K, onComplete: () => split.revert() });
   } else { h1.style.visibility = 'visible'; }
@@ -710,11 +710,16 @@ else {
 /* ================= rotating word ================= */
 function startRotator() {
   if (RM) return;
-  const words = ['perfection', 'precision', 'alignment', 'clarity']; let i = 0;
+  let i = 0;
   setInterval(() => {
-    const el = $('#rotWord'); if (!el) return;
-    el.classList.remove('in'); el.classList.add('out');
-    setTimeout(() => { i = (i + 1) % words.length; el.textContent = words[i]; el.classList.remove('out'); el.classList.add('in'); }, 440);
+    const words = $$('#rotWord .rw'); if (!words.length) return;
+    const cur = words[i], next = words[(i + 1) % words.length];
+    cur.classList.remove('on'); cur.classList.add('off');
+    setTimeout(() => {
+      next.style.transition = 'none'; next.classList.remove('off'); void next.offsetWidth;   // reset above the line, unseen
+      next.style.transition = ''; next.classList.add('on');
+      i = (i + 1) % words.length;
+    }, 440);
   }, 2800);
 }
 
