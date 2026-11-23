@@ -37,6 +37,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 
 /* ---------- canvas world ---------- */
 #world{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+#world.attached{position:absolute;inset:auto;left:0;top:0;will-change:transform}
 main,footer{position:relative;z-index:1}
 
 
@@ -791,11 +792,20 @@ function equalizeCards() {
   const tallest = Math.max(...cards.map(c => c.offsetHeight));
   cards.forEach(c => { c.style.minHeight = tallest + 'px'; });
 }
+const OVER = .35;
 function measure() {
   equalizeCards();
   const W = innerWidth, H = innerHeight;
-  dpr = Math.min(devicePixelRatio || 1, 2);
-  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  // phones: the page-attached canvas is taller than the screen, so it renders at 1.5x (measured: smooth, still crisp)
+  dpr = lenis ? Math.min(devicePixelRatio || 1, 2) : Math.min(devicePixelRatio || 1, 1.5);
+  // native scroll (phones, reduced motion): the world canvas scrolls WITH the page, drawn taller than the screen,
+  // so iOS momentum scrolling can never leave text drifting off its drawn background. Smooth-scroll keeps it fixed.
+  const attach = !lenis;
+  const CH = attach ? Math.round(Math.max(H, screen.height || 0, d.documentElement.clientHeight) * (1 + 2 * OVER)) : H;
+  const bw = Math.round(W * dpr), bh = Math.round(CH * dpr);
+  if (cv.width !== bw) cv.width = bw;
+  if (cv.height !== bh) cv.height = bh;
+  cv.classList.toggle('attached', attach); cv.style.height = attach ? CH + 'px' : '';
   const sy = scrollY, top = el => el.getBoundingClientRect().top + sy, bot = el => el.getBoundingClientRect().bottom + sy;
   const mobile = W < 860, stage = $('#rigStage').getBoundingClientRect();
   const mud = bot(hero), stT = top(sidetrack), stB = bot(sidetrack), stH = stB - stT;
@@ -835,7 +845,7 @@ function measure() {
   g.plug = g.kop + dy * .5;
   const font = getComputedStyle(d.body).getPropertyValue('--mono');
   g.font = `400 11px ${font}`;
-  G = g;
+  G = g; G.attach = attach; G.CH = CH;
   pats = {};
   ['shale', 'sand', 'lime', 'silt'].forEach(k => { pats[k] = { cold: makePattern(k, 'rgba(246,243,234,1)'), hot: makePattern(k, 'rgba(255,90,26,1)'), ink: makePattern(k, 'rgba(22,35,42,1)') }; });
   buildRail();
@@ -974,9 +984,14 @@ let activeEl = null;
 function draw(t) {
   if (!G) return;
   const { W, H } = G, sy = scrollY;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
-  ctx.save(); ctx.translate(0, -sy);
-  const v0 = sy - 40, v1 = sy + H + 40;
+  let org = sy, CHh = H;
+  if (G.attach) {                                   // re-centre the page-attached canvas around the viewport
+    CHh = G.CH; org = Math.round(Math.max(-OVER * H, Math.min(sy - (CHh - H) / 2, G.docEnd - CHh)));
+    if (org !== G.org) { cv.style.transform = `translate3d(0,${org}px,0)`; G.org = org; }
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, CHh);
+  ctx.save(); ctx.translate(0, -org);
+  const v0 = org - 40, v1 = org + CHh + 40;
   // continuous measured depth: negative while the bit is still being lowered towards the mudline
   const ys = sy + H * .56, raw = ys < G.mud ? ys - G.mud : mdFromScroll(ys);
   const bitMD = Math.min(G.mdTotal, raw + SPUD);
