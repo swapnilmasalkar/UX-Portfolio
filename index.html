@@ -113,6 +113,8 @@ html.js:not(.hero-in) .rail-bars i,html.js:not(.hero-in) .rail-read{opacity:0}
 .formation > .wrap{width:100%}
 .card{display:grid;width:100%;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);align-items:stretch;border:1px solid var(--line);background:rgba(18,34,41,.9);position:relative;transition:border-color .5s var(--ease),opacity .7s var(--ease),transform .7s var(--ease)}
 .js .card{opacity:0;transform:translateY(28px)}
+/* touch screens: reveal by fading in place, never slide; a slide during a finger scroll reads as text drifting */
+@media (hover:none) and (pointer:coarse){.js .card{transform:none}}
 .js .reached .card{opacity:1;transform:none}
 .is-active .card{border-color:rgba(255,90,26,.55)}
 .card::after{content:'';position:absolute;left:0;right:0;bottom:0;height:0;background:rgba(246,243,234,.04);transition:height .333s var(--ease);pointer-events:none}
