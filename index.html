@@ -38,6 +38,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 /* ---------- canvas world ---------- */
 #world{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
 #world.attached{position:absolute;inset:auto;left:0;top:0;will-change:transform}
+/* the drill string is screen-anchored: its own fixed layer, sized to the full screen so the iOS toolbar never resizes it */
+#drill{position:fixed;left:0;top:0;width:0;height:100vh;height:100lvh;z-index:0;pointer-events:none;will-change:transform}
+#lvhProbe{position:fixed;left:0;top:0;width:0;height:100vh;height:100lvh;visibility:hidden;pointer-events:none}
 main,footer{position:relative;z-index:1}
 
 
@@ -202,6 +205,8 @@ footer a:hover{color:var(--ink)}
 
 
 <canvas id="world" aria-hidden="true"></canvas>
+<canvas id="drill" aria-hidden="true"></canvas>
+<div id="lvhProbe" aria-hidden="true"></div>
 
 <div class="rail" aria-hidden="true">
   <div class="rail-bars" id="railBars"></div>
@@ -758,7 +763,8 @@ copyBtn.addEventListener('click', async () => {
 });
 
 /* ================= the world: strata, sidetrack, depth ================= */
-const cv = $('#world'), ctx = cv.getContext('2d');
+const cv = $('#world'), wctx = cv.getContext('2d'), dcv = $('#drill'), dctx = dcv.getContext('2d');
+let ctx = wctx, ddpr = 1;
 const hero = $('#hero'), sidetrack = $('#sidetrack'), work = $('#work'), about = $('#about'), contact = $('#contact');
 const forms = $$('.formation');
 const TD_M = 620;
@@ -853,6 +859,12 @@ function measure() {
   const font = getComputedStyle(d.body).getPropertyValue('--mono');
   g.font = `400 11px ${font}`;
   G = g; G.attach = attach; G.CH = CH;
+  // the bit sits at 56% of the FULL screen height, which doesn't change when Safari's toolbar shows/hides
+  G.HB = $('#lvhProbe').offsetHeight || H;
+  ddpr = Math.min(devicePixelRatio || 1, 2);
+  const dh = Math.round(G.HB * ddpr);
+  if (dcv.height !== dh) dcv.height = dh;
+  G.stripL = G.stripW = -1;
   pats = {};
   ['shale', 'sand', 'lime', 'silt'].forEach(k => { pats[k] = { cold: makePattern(k, 'rgba(246,243,234,1)'), hot: makePattern(k, 'rgba(255,90,26,1)'), ink: makePattern(k, 'rgba(22,35,42,1)') }; });
   buildRail();
@@ -991,24 +1003,31 @@ let activeEl = null;
 function draw(t) {
   if (!G) return;
   const { W, H } = G, sy = scrollY;
-  let org = sy, CHh = H;
-  if (G.attach) {                                   // re-centre the page-attached canvas around the viewport
-    CHh = G.CH; org = Math.round(Math.max(-OVER * H, Math.min(sy - (CHh - H) / 2, G.docEnd - CHh)));
-    if (org !== G.org) { cv.style.transform = `translate3d(0,${org}px,0)`; G.org = org; }
-  }
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, CHh);
-  ctx.save(); ctx.translate(0, -org);
-  const v0 = org - 40, v1 = org + CHh + 40;
   // continuous measured depth: negative while the bit is still being lowered towards the mudline
-  const ys = sy + H * .56, raw = ys < G.mud ? ys - G.mud : mdFromScroll(ys);
+  const ys = sy + G.HB * .56, raw = ys < G.mud ? ys - G.mud : mdFromScroll(ys);
   const bitMD = Math.min(G.mdTotal, raw + SPUD);
   const drilling = bitMD > -90;
   const bitPos = bitMD < 0 ? [G.xr, G.mud + bitMD, 0, bitMD] : posAt(bitMD);
-  const bitY = bitPos[1];
+  const bitY = bitPos[1], bitX = bitPos[0];
   let active = -1; G.bands.forEach((b, i) => { if (drilling && bitY >= b.y0 && bitY < b.y1) active = i; });
-  // bit x for wave highlight
-  const bitX = bitPos[0];
-  wave = false;
+  let org = sy, CHh = H;
+  if (G.attach) {
+    // page-attached canvas: re-centre only once the view has used half the spare margin (not every frame)
+    CHh = G.CH; const ideal = sy - (CHh - H) / 2, slack = (CHh - H) / 4;
+    org = G.org === undefined || Math.abs(ideal - G.org) > slack ? ideal : G.org;
+    org = Math.round(Math.max(-OVER * H, Math.min(org, G.docEnd - CHh)));
+    if (org !== G.org) { cv.style.transform = `translate3d(0,${org}px,0)`; G.org = org; }
+  }
+  const v0 = org - 40, v1 = org + CHh + 40;
+  // the geology only needs repainting when something on it changes (or always, when the canvas is screen-fixed)
+  const resVis = G.bands.some(b => b.lith === 'res' && !(b.y1 < v0 || b.y0 > v1));
+  const midL = G.mobile ? G.mud + 64 : (G.mud + G.kop) / 2;
+  const key = [org, active, drilling, bitY > midL + 90, bitMD > G.mdKop, bitMD > G.mdBend].join();
+  wave = resVis;
+  if (!G.attach || (resVis && !RM) || key !== G.wkey) {
+  G.wkey = key;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, CHh);
+  ctx.save(); ctx.translate(0, -org);
   G.bands.forEach((b, i) => {
     if (b.y1 < v0 || b.y0 > v1) return;
     const hot = i === active;
@@ -1017,7 +1036,7 @@ function draw(t) {
     if (b.strata) { ctx.lineWidth = 1; b.strata.forEach(l => { if (l.pts[0][1] > v1 + 60 || l.pts[0][1] < v0 - 60) return; ctx.strokeStyle = hot ? `rgba(255,140,90,${l.a + .03})` : `rgba(170,190,198,${l.a})`; ctx.beginPath(); polyline(l.pts); ctx.stroke(); }); }
     if (light) { ctx.fillStyle = '#F6F3EA'; ctx.fillRect(0, Math.max(b.y0 - 30, v0), W, Math.min(b.y1 + 30, v1) - Math.max(b.y0 - 30, v0)); }
     if (pats[b.lith]) { ctx.globalAlpha = light ? (hot ? .2 : .1) : hot ? .15 : .055; ctx.fillStyle = hot ? pats[b.lith].hot : light ? pats[b.lith].ink : pats[b.lith].cold; ctx.fillRect(0, Math.max(b.y0 - 30, v0), W, Math.min(b.y1 + 30, v1) - Math.max(b.y0 - 30, v0)); ctx.globalAlpha = 1; }
-    if (b.lith === 'res') { drawWave(b, RM ? 0 : t, v0, v1, bitX, bitY); wave = true; }
+    if (b.lith === 'res') drawWave(b, RM ? 0 : t, v0, v1, bitX, bitY);
     ctx.restore();
     // top boundary
     ctx.beginPath(); polyline(b.top);
@@ -1029,22 +1048,49 @@ function draw(t) {
   // mudline label
   ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(143,163,171,.7)';
   if (G.mud > v0 && G.mud < v1) ctx.fillText('Mudline  000 m', G.mobile ? 76 : 140, G.mud + 22);
-  // planned trajectory
-  ctx.setLineDash([3, 6]); ctx.strokeStyle = 'rgba(255,90,26,.22)'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(bitX, Math.max(bitY, G.mud + 2));
-  for (const p of G.path) if (p[3] > bitMD) ctx.lineTo(p[0], p[1]);
-  ctx.stroke(); ctx.setLineDash([]);
-  if (!drilling) { ctx.restore(); return active; }
-  // everything drilled lives below the mudline: clip so the bit emerges from under the hero strip
-  ctx.save(); ctx.beginPath(); ctx.rect(0, G.mud + 1, W, 1e7); ctx.clip();
+  // ---- geology annotations: page-anchored, on the world canvas ----
+  if (drilling) {
   // original hole: continues past KOP, then plugged
   if (bitMD > G.mdKop) {
-    const end = Math.min(G.plug, G.kop + (bitMD - G.mdKop) + 200);
+    const end = G.plug;
     ctx.setLineDash([2, 4]); ctx.strokeStyle = 'rgba(91,122,140,.7)'; ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.moveTo(G.xr, G.kop); ctx.lineTo(G.xr, end); ctx.stroke(); ctx.setLineDash([]);
     if (end >= G.plug) { ctx.strokeStyle = 'rgba(91,122,140,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(G.xr - 7, G.plug); ctx.lineTo(G.xr + 7, G.plug); ctx.moveTo(G.xr - 7, G.plug + 4); ctx.lineTo(G.xr + 7, G.plug + 4); ctx.stroke();
       ctx.fillStyle = 'rgba(143,163,171,.7)'; ctx.textAlign = G.mobile ? 'right' : 'left'; ctx.fillText('Original hole, plugged', G.xr + (G.mobile ? -14 : 14), G.plug + 6); }
   }
+  // labels on the string
+  ctx.textAlign = G.mobile ? 'right' : 'left';
+  const lx = G.xr + (G.mobile ? -22 : 22);
+  const mid = G.mobile ? G.mud + 64 : (G.mud + G.kop) / 2;
+  if (bitY > mid + 90) { ctx.fillStyle = 'rgba(143,163,171,.8)'; ctx.fillText('Oil and gas engineering', lx, mid); }
+  if (bitMD > G.mdKop) {
+    ctx.fillStyle = 'rgba(255,90,26,.95)'; ctx.fillText(`Kick-off point  ${pad3(depthAt(G.kop))} m`, lx, G.kop + 4);
+    ctx.fillStyle = 'rgba(143,163,171,.8)'; ctx.fillText('Nov 2022', lx, G.kop + 20);
+    ctx.beginPath(); ctx.arc(G.xr, G.kop, 3.5, 0, 7); ctx.fill();
+  }
+  if (bitMD > G.mdBend) { ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(255,90,26,.95)'; ctx.fillText('Product design', G.xl + 22, G.bend + 4); }
+  }
+  ctx.restore();
+  }
+  // ---- the drill string: screen-anchored, on its own fixed layer ----
+  // the layer is only as wide as the strip the string occupies on screen right now (plus room for the bit and cuttings)
+  let xmin = bitX, xmax = bitX;
+  const yTop = sy - 30, yBot = sy + G.HB + 30;
+  for (const p of G.path) if (p[1] >= yTop && p[1] <= yBot) { if (p[0] < xmin) xmin = p[0]; if (p[0] > xmax) xmax = p[0]; }
+  const pad = G.mobile ? 80 : 96;
+  const L = Math.max(0, Math.floor((xmin - pad) / 32) * 32), R = Math.min(W, Math.ceil((xmax + pad) / 32) * 32), SW = Math.max(32, R - L);
+  if (SW !== G.stripW) { dcv.width = Math.round(SW * ddpr); dcv.style.width = SW + 'px'; G.stripW = SW; }
+  if (L !== G.stripL) { dcv.style.transform = `translate3d(${L}px,0,0)`; G.stripL = L; }
+  ctx = dctx;
+  ctx.setTransform(ddpr, 0, 0, ddpr, 0, 0); ctx.clearRect(0, 0, SW, dcv.height / ddpr);
+  ctx.save(); ctx.translate(-L, -sy); ctx.font = G.font;
+  // planned trajectory
+  ctx.setLineDash([3, 6]); ctx.strokeStyle = 'rgba(255,90,26,.22)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(bitX, Math.max(bitY, G.mud + 2));
+  for (const p of G.path) if (p[3] > bitMD) ctx.lineTo(p[0], p[1]);
+  ctx.stroke(); ctx.setLineDash([]);
+  if (drilling) {
+    ctx.save(); ctx.beginPath(); ctx.rect(0, G.mud + 1, W, 1e7); ctx.clip();
   // drill pipe: blueprint double line with tool joints, steel before KOP, rust after
   const drilled = bitMD > 20 ? G.path.filter(p => p[3] < bitMD - 20) : [];
   if (bitMD > 20) drilled.push(posAt(bitMD - 20));
@@ -1072,17 +1118,6 @@ function draw(t) {
     ctx.strokeStyle = m > G.mdKop ? 'rgba(255,90,26,.75)' : 'rgba(143,163,171,.75)'; ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.moveTo(q[0] - ty / l * 4, q[1] + tx / l * 4); ctx.lineTo(q[0] + ty / l * 4, q[1] - tx / l * 4); ctx.stroke();
   }
-  // labels on the string
-  ctx.textAlign = G.mobile ? 'right' : 'left';
-  const lx = G.xr + (G.mobile ? -22 : 22);
-  const mid = G.mobile ? G.mud + 64 : (G.mud + G.kop) / 2;
-  if (bitY > mid + 90) { ctx.fillStyle = 'rgba(143,163,171,.8)'; ctx.fillText('Oil and gas engineering', lx, mid); }
-  if (bitMD > G.mdKop) {
-    ctx.fillStyle = 'rgba(255,90,26,.95)'; ctx.fillText(`Kick-off point  ${pad3(depthAt(G.kop))} m`, lx, G.kop + 4);
-    ctx.fillStyle = 'rgba(143,163,171,.8)'; ctx.fillText('Nov 2022', lx, G.kop + 20);
-    ctx.beginPath(); ctx.arc(G.xr, G.kop, 3.5, 0, 7); ctx.fill();
-  }
-  if (bitMD > G.mdBend) { ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(255,90,26,.95)'; ctx.fillText('Product design', G.xl + 22, G.bend + 4); }
   // the bit: tangent taken along measured depth, so it glides through the curve
   const pa = m => m < 0 ? [G.xr, G.mud + m, 0, m] : posAt(m);
   const ta = pa(bitMD - 12), tb = pa(Math.min(G.mdTotal, bitMD + 4));
@@ -1092,9 +1127,11 @@ function draw(t) {
   const silt = G.bands.find(b => b.lith === 'silt'), onLight = silt && bitY > silt.y0 && bitY < silt.y1;
   drawCuttings();
   drawBit(bitX, bitY, ang, bitMD > G.mdKop ? '#FF5A1A' : '#8FA3AB', spin.phase, onLight ? '#F6F3EA' : '#0E1A1F');
-  ctx.restore();
+    ctx.restore();
   if (bitMD >= G.mdTotal - 1 && !G.mobile) { ctx.textAlign = 'center'; ctx.fillStyle = '#FF5A1A'; ctx.fillText(`TD ${TD_M} m`, bitX, bitY + 24); ctx.fillStyle = 'rgba(143,163,171,.85)'; ctx.fillText('Well delivered', bitX, bitY + 40); }
+  }
   ctx.restore();
+  ctx = wctx;
   return active;
 }
 
@@ -1102,7 +1139,7 @@ function sync(t) {
   const active = draw(t);
   if (!G) return;
   const bitY = G.pose ? G.pose.y : G.mud;
-  railUpdate(scrollY + G.H * .56 > G.mud ? depthAt(bitY) : 0);
+  railUpdate(scrollY + G.HB * .56 > G.mud ? depthAt(bitY) : 0);
   rigZoom();
   const el = active >= 0 ? G.bands[active].el : null;
   if (el !== activeEl) { if (activeEl) activeEl.classList.remove('is-active'); if (el) el.classList.add('is-active'); activeEl = el; }
