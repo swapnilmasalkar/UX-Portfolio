@@ -908,17 +908,18 @@ function drawWave(b, t, v0, v1, bitX, bitY) {
 let railBars = [], prevHot = [];
 function buildRail() {
   const box = $('#railBars'); box.innerHTML = '';
-  const n = Math.max(12, Math.floor((box.clientHeight || innerHeight - 100) / 8));
+  const full = Math.max(box.clientHeight || 0, (G && G.HB ? G.HB : innerHeight) - 172);   // full screen height, so a collapsing toolbar never leaves the rail short
+  const n = Math.max(12, Math.floor(full / 8));
   const frag = d.createDocumentFragment();
   for (let i = 0; i < n; i++) { const b = d.createElement('i'); if (i % 5 === 0) b.className = 'mj'; b.style.setProperty('--d', (.3 + i / n * .9).toFixed(3)); frag.appendChild(b); }
   box.appendChild(frag); railBars = [...box.children]; prevHot = [];
 }
 function railUpdate(depth) {
-  const n = railBars.length; if (!n) return;
+  if (!railBars.length) return;
+  const hgt = $('#railBars').clientHeight, n = Math.max(2, Math.min(railBars.length, Math.floor((hgt + 6) / 8)));   // bars visible right now
   const idx = Math.round(clamp(depth / TD_M, 0, 1) * (n - 1)), env = [.2, .5, 1, .5, .2];
   prevHot.forEach(b => { b.style.background = ''; }); prevHot = [];
   env.forEach((a, k) => { const b = railBars[idx + k - 2]; if (b) { b.style.background = `rgba(255,90,26,${a})`; prevHot.push(b); } });
-  const hgt = $('#railBars').clientHeight;
   const read = $('#railRead'), rh = read.offsetHeight || 60;
   read.style.transform = `translateY(${Math.min(76 + idx / Math.max(1, n - 1) * hgt + 10, innerHeight - rh - 16)}px)`;
   $('#railDepth').textContent = pad3(depth) + ' m';
@@ -1062,7 +1063,7 @@ function draw(t) {
   if (drilling) {
     if (inView(midA)) span(lxA, 'Oil and gas engineering', G.mobile);
     if (inView(G.kop)) { span(lxA, 'Kick-off point  000 m', G.mobile); xmax = Math.max(xmax, G.xr + 8); xmin = Math.min(xmin, G.xr - 8); }
-    if (inView(G.plug)) { span(G.xr + (G.mobile ? -14 : 14), 'Original hole, plugged', G.mobile); xmin = Math.min(xmin, G.xr - 9); xmax = Math.max(xmax, G.xr + 9); }
+    if (inView(G.plug)) { span(G.mobile ? G.xr + 7 : G.xr + 14, G.mobile ? 'Original hole,' : 'Original hole, plugged', G.mobile); xmin = Math.min(xmin, G.xr - 9); xmax = Math.max(xmax, G.xr + 9); }
     if (inView(G.bend)) span(G.xl + 22, 'Product design', false);
   }
   const pad = G.mobile ? 80 : 96;
@@ -1087,7 +1088,10 @@ function draw(t) {
     ctx.setLineDash([2, 4]); ctx.strokeStyle = 'rgba(91,122,140,.7)'; ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.moveTo(G.xr, G.kop); ctx.lineTo(G.xr, end); ctx.stroke(); ctx.setLineDash([]);
     if (end >= G.plug) { ctx.strokeStyle = 'rgba(91,122,140,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(G.xr - 7, G.plug); ctx.lineTo(G.xr + 7, G.plug); ctx.moveTo(G.xr - 7, G.plug + 4); ctx.lineTo(G.xr + 7, G.plug + 4); ctx.stroke();
-      ctx.fillStyle = 'rgba(143,163,171,.7)'; ctx.textAlign = G.mobile ? 'right' : 'left'; ctx.fillText('Original hole, plugged', G.xr + (G.mobile ? -14 : 14), G.plug + 6); }
+      ctx.fillStyle = 'rgba(143,163,171,.7)'; ctx.textAlign = G.mobile ? 'right' : 'left';
+      // phones: two lines tucked under the marker, where the curve has already swept away (measured clearance at 320–430px)
+      if (G.mobile) { ctx.fillText('Original hole,', G.xr + 7, G.plug + 20); ctx.fillText('plugged', G.xr + 7, G.plug + 34); }
+      else ctx.fillText('Original hole, plugged', G.xr + 14, G.plug + 6); }
   }
   // drill pipe: blueprint double line with tool joints, steel before KOP, rust after
   const drilled = bitMD > 20 ? G.path.filter(p => p[3] < bitMD - 20) : [];
@@ -1173,7 +1177,12 @@ let remeasured = false;
 const remeasure = () => { if (remeasured) return; remeasured = true; measure(); request(); };
 addEventListener('scroll', () => { if (performance.now() < INTRO_END && !remeasured) remeasure(); }, { passive: true });
 addEventListener('scroll', request, { passive: true });
-let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { measure(); request(); }, 150); });
+let rz, lastW = innerWidth;
+addEventListener('resize', () => {
+  if (!lenis && innerWidth === lastW) { request(); return; }   // toolbar only: keep the world, just redraw
+  lastW = innerWidth;
+  clearTimeout(rz); rz = setTimeout(() => { measure(); request(); }, 150);
+});
 const whenLoaded = f => d.readyState === 'complete' ? setTimeout(f, 0) : addEventListener('load', f, { once: true });
 const idle = f => (window.requestIdleCallback || (g => setTimeout(g, 200)))(f, { timeout: 1200 });
 whenLoaded(() => { const fontsIn = d.fonts && d.fonts.ready ? d.fonts.ready : Promise.resolve(); fontsIn.then(() => afterIntro(() => idle(remeasure))); });
