@@ -1021,8 +1021,7 @@ function draw(t) {
   const v0 = org - 40, v1 = org + CHh + 40;
   // the geology only needs repainting when something on it changes (or always, when the canvas is screen-fixed)
   const resVis = G.bands.some(b => b.lith === 'res' && !(b.y1 < v0 || b.y0 > v1));
-  const midL = G.mobile ? G.mud + 64 : (G.mud + G.kop) / 2;
-  const key = [org, active, drilling, bitY > midL + 90, bitMD > G.mdKop, bitMD > G.mdBend].join();
+  const key = [org, active].join();
   wave = resVis;
   if (!G.attach || (resVis && !RM) || key !== G.wkey) {
   G.wkey = key;
@@ -1048,28 +1047,6 @@ function draw(t) {
   // mudline label
   ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(143,163,171,.7)';
   if (G.mud > v0 && G.mud < v1) ctx.fillText('Mudline  000 m', G.mobile ? 76 : 140, G.mud + 22);
-  // ---- geology annotations: page-anchored, on the world canvas ----
-  if (drilling) {
-  // original hole: continues past KOP, then plugged
-  if (bitMD > G.mdKop) {
-    const end = G.plug;
-    ctx.setLineDash([2, 4]); ctx.strokeStyle = 'rgba(91,122,140,.7)'; ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.moveTo(G.xr, G.kop); ctx.lineTo(G.xr, end); ctx.stroke(); ctx.setLineDash([]);
-    if (end >= G.plug) { ctx.strokeStyle = 'rgba(91,122,140,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(G.xr - 7, G.plug); ctx.lineTo(G.xr + 7, G.plug); ctx.moveTo(G.xr - 7, G.plug + 4); ctx.lineTo(G.xr + 7, G.plug + 4); ctx.stroke();
-      ctx.fillStyle = 'rgba(143,163,171,.7)'; ctx.textAlign = G.mobile ? 'right' : 'left'; ctx.fillText('Original hole, plugged', G.xr + (G.mobile ? -14 : 14), G.plug + 6); }
-  }
-  // labels on the string
-  ctx.textAlign = G.mobile ? 'right' : 'left';
-  const lx = G.xr + (G.mobile ? -22 : 22);
-  const mid = G.mobile ? G.mud + 64 : (G.mud + G.kop) / 2;
-  if (bitY > mid + 90) { ctx.fillStyle = 'rgba(143,163,171,.8)'; ctx.fillText('Oil and gas engineering', lx, mid); }
-  if (bitMD > G.mdKop) {
-    ctx.fillStyle = 'rgba(255,90,26,.95)'; ctx.fillText(`Kick-off point  ${pad3(depthAt(G.kop))} m`, lx, G.kop + 4);
-    ctx.fillStyle = 'rgba(143,163,171,.8)'; ctx.fillText('Nov 2022', lx, G.kop + 20);
-    ctx.beginPath(); ctx.arc(G.xr, G.kop, 3.5, 0, 7); ctx.fill();
-  }
-  if (bitMD > G.mdBend) { ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(255,90,26,.95)'; ctx.fillText('Product design', G.xl + 22, G.bend + 4); }
-  }
   ctx.restore();
   }
   // ---- the drill string: screen-anchored, on its own fixed layer ----
@@ -1077,9 +1054,22 @@ function draw(t) {
   let xmin = bitX, xmax = bitX;
   const yTop = sy - 30, yBot = sy + G.HB + 30;
   for (const p of G.path) if (p[1] >= yTop && p[1] <= yBot) { if (p[0] < xmin) xmin = p[0]; if (p[0] > xmax) xmax = p[0]; }
+  // the well's labels and marks ride on this layer too, so include whichever are on screen
+  dctx.font = G.font;
+  const inView = y => y >= yTop && y <= yBot;
+  const span = (x, txt, alignRight) => { const w = dctx.measureText(txt).width; if (alignRight) { xmin = Math.min(xmin, x - w); xmax = Math.max(xmax, x); } else { xmin = Math.min(xmin, x); xmax = Math.max(xmax, x + w); } };
+  const lxA = G.xr + (G.mobile ? -22 : 22), midA = G.mobile ? G.mud + 64 : (G.mud + G.kop) / 2;
+  if (drilling) {
+    if (inView(midA)) span(lxA, 'Oil and gas engineering', G.mobile);
+    if (inView(G.kop)) { span(lxA, 'Kick-off point  000 m', G.mobile); xmax = Math.max(xmax, G.xr + 8); xmin = Math.min(xmin, G.xr - 8); }
+    if (inView(G.plug)) { span(G.xr + (G.mobile ? -14 : 14), 'Original hole, plugged', G.mobile); xmin = Math.min(xmin, G.xr - 9); xmax = Math.max(xmax, G.xr + 9); }
+    if (inView(G.bend)) span(G.xl + 22, 'Product design', false);
+  }
   const pad = G.mobile ? 80 : 96;
-  const L = Math.max(0, Math.floor((xmin - pad) / 32) * 32), R = Math.min(W, Math.ceil((xmax + pad) / 32) * 32), SW = Math.max(32, R - L);
-  if (SW !== G.stripW) { dcv.width = Math.round(SW * ddpr); dcv.style.width = SW + 'px'; G.stripW = SW; }
+  const needL = Math.max(0, Math.floor((xmin - pad) / 32) * 32), needR = Math.min(W, Math.ceil((xmax + pad) / 32) * 32), need = Math.max(32, needR - needL);
+  // capacity only grows while needed; it shrinks back once the need has dropped well below it (one resize, not one per frame)
+  if (need > G.stripW || need < G.stripW * .5) { G.stripW = need; dcv.width = Math.round(need * ddpr); dcv.style.width = need + 'px'; }
+  const SW = G.stripW, L = Math.max(0, Math.min(needL, W - SW));
   if (L !== G.stripL) { dcv.style.transform = `translate3d(${L}px,0,0)`; G.stripL = L; }
   ctx = dctx;
   ctx.setTransform(ddpr, 0, 0, ddpr, 0, 0); ctx.clearRect(0, 0, SW, dcv.height / ddpr);
@@ -1091,6 +1081,14 @@ function draw(t) {
   ctx.stroke(); ctx.setLineDash([]);
   if (drilling) {
     ctx.save(); ctx.beginPath(); ctx.rect(0, G.mud + 1, W, 1e7); ctx.clip();
+  // original hole: continues past KOP, then plugged
+  if (bitMD > G.mdKop) {
+    const end = G.plug;
+    ctx.setLineDash([2, 4]); ctx.strokeStyle = 'rgba(91,122,140,.7)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(G.xr, G.kop); ctx.lineTo(G.xr, end); ctx.stroke(); ctx.setLineDash([]);
+    if (end >= G.plug) { ctx.strokeStyle = 'rgba(91,122,140,.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(G.xr - 7, G.plug); ctx.lineTo(G.xr + 7, G.plug); ctx.moveTo(G.xr - 7, G.plug + 4); ctx.lineTo(G.xr + 7, G.plug + 4); ctx.stroke();
+      ctx.fillStyle = 'rgba(143,163,171,.7)'; ctx.textAlign = G.mobile ? 'right' : 'left'; ctx.fillText('Original hole, plugged', G.xr + (G.mobile ? -14 : 14), G.plug + 6); }
+  }
   // drill pipe: blueprint double line with tool joints, steel before KOP, rust after
   const drilled = bitMD > 20 ? G.path.filter(p => p[3] < bitMD - 20) : [];
   if (bitMD > 20) drilled.push(posAt(bitMD - 20));
@@ -1118,6 +1116,17 @@ function draw(t) {
     ctx.strokeStyle = m > G.mdKop ? 'rgba(255,90,26,.75)' : 'rgba(143,163,171,.75)'; ctx.lineWidth = 1.4;
     ctx.beginPath(); ctx.moveTo(q[0] - ty / l * 4, q[1] + tx / l * 4); ctx.lineTo(q[0] + ty / l * 4, q[1] - tx / l * 4); ctx.stroke();
   }
+  // labels on the string
+  ctx.textAlign = G.mobile ? 'right' : 'left';
+  const lx = G.xr + (G.mobile ? -22 : 22);
+  const mid = G.mobile ? G.mud + 64 : (G.mud + G.kop) / 2;
+  if (bitY > mid + 90) { ctx.fillStyle = 'rgba(143,163,171,.8)'; ctx.fillText('Oil and gas engineering', lx, mid); }
+  if (bitMD > G.mdKop) {
+    ctx.fillStyle = 'rgba(255,90,26,.95)'; ctx.fillText(`Kick-off point  ${pad3(depthAt(G.kop))} m`, lx, G.kop + 4);
+    ctx.fillStyle = 'rgba(143,163,171,.8)'; ctx.fillText('Nov 2022', lx, G.kop + 20);
+    ctx.beginPath(); ctx.arc(G.xr, G.kop, 3.5, 0, 7); ctx.fill();
+  }
+  if (bitMD > G.mdBend) { ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(255,90,26,.95)'; ctx.fillText('Product design', G.xl + 22, G.bend + 4); }
   // the bit: tangent taken along measured depth, so it glides through the curve
   const pa = m => m < 0 ? [G.xr, G.mud + m, 0, m] : posAt(m);
   const ta = pa(bitMD - 12), tb = pa(Math.min(G.mdTotal, bitMD + 4));
